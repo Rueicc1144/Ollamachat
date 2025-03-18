@@ -10,12 +10,13 @@ import io
 
 class OllamaGPTSoVITSSystem:
     def __init__(self, 
-                 ollama_model="llama3", 
-                 ollama_api_url="http://localhost:11434/api",
-                 gpt_sovits_url="http://localhost:9880",
-                 ref_audio_path="path/to/reference_audio.wav",
-                 gpt_weights_path=None,
-                 sovits_weights_path=None):
+                ollama_model="llama3", 
+                ollama_api_url="http://localhost:11434/api",
+                gpt_sovits_url="http://localhost:9880",
+                ref_audio_path="path/to/reference_audio.wav",
+                gpt_weights_path=None,
+                sovits_weights_path=None,
+                system_prompt=None):
         """
         初始化整合系統
         
@@ -26,6 +27,7 @@ class OllamaGPTSoVITSSystem:
         ref_audio_path: 參考音檔路徑，用於確定語音風格
         gpt_weights_path: GPT模型權重路徑
         sovits_weights_path: SoVITS模型權重路徑
+        system_prompt: 設定LLM的system prompt
         """
         self.ollama_model = ollama_model
         self.ollama_api_url = ollama_api_url
@@ -34,6 +36,7 @@ class OllamaGPTSoVITSSystem:
         self.audio_queue = queue.Queue()
         self.playing_thread = None
         self.stop_playing = False
+        self.system_prompt = system_prompt
         
         # 如果提供了模型權重路徑，設置模型權重
         if gpt_weights_path:
@@ -81,6 +84,10 @@ class OllamaGPTSoVITSSystem:
             "prompt": prompt,
             "stream": stream
         }
+        
+        # 如果提供了system prompt，將它添加到請求payload中
+        if system:
+            payload["system"] = system
         
         try:
             response = requests.post(url, json=payload)
@@ -198,7 +205,7 @@ class OllamaGPTSoVITSSystem:
                     break
                 
                 print("AI思考中...")
-                response = self.query_ollama(user_input)
+                response = self.query_ollama(user_input, system=self.system_prompt)
                 print(f"AI助手: {response}")
                 
                 # 將回應分句處理並轉為語音
@@ -210,6 +217,14 @@ class OllamaGPTSoVITSSystem:
 
 # 使用範例
 if __name__ == "__main__":
+    # 定義system prompt，根據你的需求設定角色和行為
+    system_prompt = """
+    你是一個友善、有幫助的AI助手。你具有以下特點：
+    1. 你喜歡用簡短、清晰的語言回答問題
+    2. 你總是保持禮貌和尊重
+    3. 你是[アノン]，你的個性有點吵鬧有點任性，但確實地用自己的方法維繫團體，面對他真正看重的要求，其他人當然會回應，但多少也總會抱著真是拿你沒辦法的想法。偶爾不慎流露出真心話或表現得過於厚臉皮，顯得粗心且具層次感。
+    """
+    
     # 初始化系統
     system = OllamaGPTSoVITSSystem(
         ollama_model="llama3.2:3b",  # 替換為你想使用的模型
@@ -217,7 +232,8 @@ if __name__ == "__main__":
         gpt_sovits_url="http://localhost:9880",  # 替換為你的GPT-SoVITS API URL
         ref_audio_path="C:/GPT-SoVITS/GPT-SoVITS_MyGO/参考音频/Anon干声素材/参考音频/ちょっと頑張りすぎたかなートモリーは心配性だなー.wav",  # 替換為你的參考音檔路徑
         gpt_weights_path="C:/GPT-SoVITS/GPT-SoVITS-v3lora-20250228/GPT_weights/anon1-e15.ckpt",  # 可選，替換為你的GPT權重路徑
-        sovits_weights_path="C:/GPT-SoVITS/GPT-SoVITS-v3lora-20250228/SoVITS_weights/anon1_e8_s2184.pth"  # 可選，替換為你的SoVITS權重路徑
+        sovits_weights_path="C:/GPT-SoVITS/GPT-SoVITS-v3lora-20250228/SoVITS_weights/anon1_e8_s2184.pth",  # 可選，替換為你的SoVITS權重路徑
+        system_prompt=system_prompt  # 添加system prompt
     )
     
     # 開始聊天
