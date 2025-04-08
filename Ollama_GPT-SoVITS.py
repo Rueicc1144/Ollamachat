@@ -10,13 +10,14 @@ import io
 
 class OllamaGPTSoVITSSystem:
     def __init__(self, 
-                ollama_model="llama3", 
+                ollama_model="llama3.2:3b", 
                 ollama_api_url="http://localhost:11434/api",
                 gpt_sovits_url="http://localhost:9880",
                 ref_audio_path="path/to/reference_audio.wav",
                 gpt_weights_path=None,
                 sovits_weights_path=None,
-                system_prompt=None):
+                system_prompt=None,
+                max_memory=10):  # 添加最大記憶容量參數
         """
         初始化整合系統
         
@@ -28,6 +29,7 @@ class OllamaGPTSoVITSSystem:
         gpt_weights_path: GPT模型權重路徑
         sovits_weights_path: SoVITS模型權重路徑
         system_prompt: 設定LLM的system prompt
+        max_memory: 記憶的最大對話回合數
         """
         self.ollama_model = ollama_model
         self.ollama_api_url = ollama_api_url
@@ -37,6 +39,10 @@ class OllamaGPTSoVITSSystem:
         self.playing_thread = None
         self.stop_playing = False
         self.system_prompt = system_prompt
+        self.max_memory = max_memory
+        
+        # 初始化對話記憶
+        self.conversation_history = []
         
         # 如果提供了模型權重路徑，設置模型權重
         if gpt_weights_path:
@@ -74,27 +80,58 @@ class OllamaGPTSoVITSSystem:
         """設置參考音檔路徑"""
         self.ref_audio_path = ref_audio_path
         print(f"參考音檔已設置為: {ref_audio_path}")
+    
+    def add_to_history(self, role, content):
+        """添加對話內容到歷史記錄"""
+        self.conversation_history.append({"role": role, "content": content})
+        
+        # 如果超出最大記憶容量，移除最早的對話
+        if len(self.conversation_history) > self.max_memory * 2:
+            self.conversation_history = self.conversation_history[-self.max_memory*2:]
+    
+    def clear_history(self):
+        """清除對話歷史"""
+        self.conversation_history = []
+        print("對話歷史已清除")
+    
+    def format_conversation_for_context(self):
+        """將對話歷史格式化為上下文字符串"""
+        context = ""
+        for message in self.conversation_history:
+            prefix = "用戶: " if message["role"] == "user" else "助手: "
+            context += prefix + message["content"] + "\n\n"
+        return context
         
     def query_ollama(self, prompt, stream=False):
-        """向Ollama發送請求並獲取回應"""
-        url = f"{self.ollama_api_url}/generate"
+        """向Ollama發送請求並獲取回應，包含對話歷史"""
+        url = f"{self.ollama_api_url}/chat" 
+        
+        messages = []
+        
+        # 確保 system_prompt 只在歷史中出現一次
+        if not self.conversation_history or self.conversation_history[0]["role"] != "system":
+            self.conversation_history.insert(0, {"role": "system", "content": self.system_prompt})
+        
+        # 添加歷史消息
+        messages = self.conversation_history.copy()
+        
+        # 添加當前提問
+        messages.append({"role": "user", "content": prompt})
         
         payload = {
             "model": self.ollama_model,
-            "prompt": prompt,
+            "messages": messages,
             "stream": stream
         }
-        
-        # 如果提供了system prompt，將它添加到請求payload中
-        if system:
-            payload["system"] = system
         
         try:
             response = requests.post(url, json=payload)
             
             if response.status_code == 200:
                 result = response.json()
-                return result.get('response', '')
+                # 從回應中提取回應內容
+                ai_message = result.get('message', {}).get('content', '')
+                return ai_message
             else:
                 print(f"Ollama API錯誤: {response.status_code}")
                 print(response.text)
@@ -109,12 +146,12 @@ class OllamaGPTSoVITSSystem:
         
         payload = {
             "text": text,
-            "text_lang": "ja",  # 中文文本
+            "text_lang": "zh", 
             "ref_audio_path": self.ref_audio_path,
-            "prompt_lang": "ja",  # 提示語言
-            "prompt_text": "ちょっと頑張りすぎたかなー，トモリーは心配性だなー",  # 可選的提示文本
+            "prompt_lang": "zh", 
+            "prompt_text": "茶会是淑女的必修课，如果你想学习茶会礼仪的话，我可以教你哦",
             "speed_factor": 1.0,  # 語速可調整
-            "media_type": "wav"  # 輸出格式
+            "media_type": "wav"
         }
         
         try:
@@ -141,7 +178,7 @@ class OllamaGPTSoVITSSystem:
             # 播放音檔
             sd.play(audio_np, sample_rate)
             sd.wait()  # 等待音檔播放完成
-        except Exception as e:
+        except Exception as e: 
             print(f"播放音檔時出錯: {e}")
     
     def start_audio_player(self):
@@ -170,7 +207,7 @@ class OllamaGPTSoVITSSystem:
             self.playing_thread.join(timeout=2)
     
     def process_response(self, llm_response):
-        """處理LLM回應，分句轉換成語音並加入播放隊列"""
+        """處理LLM回應，分句轉換成語音並加入playlist"""
         # 根據常見標點符號分句
         sentences = []
         current_sentence = ""
@@ -192,9 +229,35 @@ class OllamaGPTSoVITSSystem:
                 if audio_data:
                     self.audio_queue.put(audio_data)
     
+    def save_conversation(self, filename="conversation_history.json"):
+        """將對話歷史保存到檔案"""
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(self.conversation_history, f, ensure_ascii=False, indent=2)
+            print(f"對話歷史已保存到 {filename}")
+        except Exception as e:
+            print(f"保存對話歷史時出錯: {e}")
+    
+    def load_conversation(self, filename="conversation_history.json"):
+        """從檔案載入對話歷史"""
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                self.conversation_history = json.load(f)
+            print(f"已從 {filename} 載入對話歷史")
+        except FileNotFoundError:
+            print(f"找不到檔案 {filename}")
+        except Exception as e:
+            print(f"載入對話歷史時出錯: {e}")
+    
     def chat(self):
         """啟動互動式聊天會話"""
-        print("開始與AI助手對話（輸入'退出'結束對話）")
+        print("開始與AI助手對話")
+        print("- 輸入'退出'結束對話")
+        print("- 輸入'清除歷史'清除對話記憶")
+        print("- 輸入'保存對話'將對話歷史保存到檔案")
+        print("- 輸入'載入對話'從檔案載入對話歷史")
+        print("- 輸入'顯示歷史'查看當前對話記憶")
+        
         self.start_audio_player()
         
         try:
@@ -203,10 +266,36 @@ class OllamaGPTSoVITSSystem:
                 
                 if user_input.lower() in ['退出', 'exit', 'quit', 'bye']:
                     break
+                elif user_input.lower() in ['清除歷史', 'clear history']:
+                    self.clear_history()
+                    continue
+                elif user_input.lower() in ['保存對話', 'save conversation']:
+                    filename = input("請輸入檔案名稱 (預設為 conversation_history.json): ").strip()
+                    if not filename:
+                        filename = "conversation_history.json"
+                    self.save_conversation(filename)
+                    continue
+                elif user_input.lower() in ['載入對話', 'load conversation']:
+                    filename = input("請輸入檔案名稱 (預設為 conversation_history.json): ").strip()
+                    if not filename:
+                        filename = "conversation_history.json"
+                    self.load_conversation(filename)
+                    continue
+                elif user_input.lower() in ['顯示歷史', 'show history']:
+                    print("\n===== 對話歷史 =====")
+                    print(self.format_conversation_for_context())
+                    print("====================\n")
+                    continue
                 
-                print("AI思考中...")
-                response = self.query_ollama(user_input, system=self.system_prompt)
-                print(f"AI助手: {response}")
+                # 添加用戶輸入到歷史記錄
+                self.add_to_history("user", user_input)
+                
+                print("Processing...")
+                response = self.query_ollama(user_input)
+                print(f"你的助手: {response}")
+                
+                # 添加AI回應到歷史記錄
+                self.add_to_history("assistant", response)
                 
                 # 將回應分句處理並轉為語音
                 self.process_response(response)
@@ -217,23 +306,22 @@ class OllamaGPTSoVITSSystem:
 
 # 使用範例
 if __name__ == "__main__":
-    # 定義system prompt，根據你的需求設定角色和行為
+    # 定義system prompt，根據需求設定角色和行為
     system_prompt = """
     你是一個友善、有幫助的AI助手。你具有以下特點：
-    1. 你喜歡用簡短、清晰的語言回答問題
-    2. 你總是保持禮貌和尊重
-    3. 你是[アノン]，你的個性有點吵鬧有點任性，但確實地用自己的方法維繫團體，面對他真正看重的要求，其他人當然會回應，但多少也總會抱著真是拿你沒辦法的想法。偶爾不慎流露出真心話或表現得過於厚臉皮，顯得粗心且具層次感。
+    你是芙寧娜，某國的統治者與知名歌劇明星。你個性幽默，標準高，私下喜愛小動物。
     """
     
     # 初始化系統
     system = OllamaGPTSoVITSSystem(
-        ollama_model="llama3.2:3b",  # 替換為你想使用的模型
+        ollama_model="llama3.2:3b", 
         ollama_api_url="http://localhost:11434/api",
         gpt_sovits_url="http://localhost:9880",  # 替換為你的GPT-SoVITS API URL
-        ref_audio_path="C:/GPT-SoVITS/GPT-SoVITS_MyGO/参考音频/Anon干声素材/参考音频/ちょっと頑張りすぎたかなートモリーは心配性だなー.wav",  # 替換為你的參考音檔路徑
-        gpt_weights_path="C:/GPT-SoVITS/GPT-SoVITS-v3lora-20250228/GPT_weights/anon1-e15.ckpt",  # 可選，替換為你的GPT權重路徑
-        sovits_weights_path="C:/GPT-SoVITS/GPT-SoVITS-v3lora-20250228/SoVITS_weights/anon1_e8_s2184.pth",  # 可選，替換為你的SoVITS權重路徑
-        system_prompt=system_prompt  # 添加system prompt
+        ref_audio_path="C:/GPT-SoVITS/芙宁娜/参考音频/【正常】茶会是淑女的必修课，如果你想学习茶会礼仪的话，我可以教你哦.wav",  # 替換為你的參考音檔路徑
+        gpt_weights_path="C:/GPT-SoVITS/芙宁娜/GPT_weights/Furina-e15.ckpt",  # 可選，替換為你的GPT權重路徑
+        sovits_weights_path="C:/GPT-SoVITS/芙宁娜/SoVITS_weights/Furina_e8_s304.pth",  # 可選，替換為你的SoVITS權重路徑
+        system_prompt=system_prompt,  # 添加system prompt
+        max_memory=10  # 設定記憶最大回合數
     )
     
     # 開始聊天
