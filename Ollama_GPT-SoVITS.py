@@ -1,6 +1,5 @@
 import requests
 import json
-import time
 import sounddevice as sd
 import numpy as np
 import soundfile as sf
@@ -10,14 +9,14 @@ import io
 
 class OllamaGPTSoVITSSystem:
     def __init__(self, 
-                ollama_model="llama3.2:3b", 
+                ollama_model="gemma3:12b", 
                 ollama_api_url="http://localhost:11434/api",
                 gpt_sovits_url="http://localhost:9880",
                 ref_audio_path="path/to/reference_audio.wav",
                 gpt_weights_path=None,
                 sovits_weights_path=None,
                 system_prompt=None,
-                max_memory=10):  # 添加最大記憶容量參數
+                max_memory=10): 
         """
         初始化整合系統
         
@@ -44,7 +43,6 @@ class OllamaGPTSoVITSSystem:
         # 初始化對話記憶
         self.conversation_history = []
         
-        # 如果提供了模型權重路徑，設置模型權重
         if gpt_weights_path:
             self.set_gpt_weights(gpt_weights_path)
         if sovits_weights_path:
@@ -108,14 +106,14 @@ class OllamaGPTSoVITSSystem:
         
         messages = []
         
-        # 確保 system_prompt 只在歷史中出現一次
+        # 確保system_prompt只在歷史中出現一次
         if not self.conversation_history or self.conversation_history[0]["role"] != "system":
             self.conversation_history.insert(0, {"role": "system", "content": self.system_prompt})
         
-        # 添加歷史消息
+        # 加入歷史消息
         messages = self.conversation_history.copy()
         
-        # 添加當前提問
+        # 加入當前提問
         messages.append({"role": "user", "content": prompt})
         
         payload = {
@@ -129,7 +127,6 @@ class OllamaGPTSoVITSSystem:
             
             if response.status_code == 200:
                 result = response.json()
-                # 從回應中提取回應內容
                 ai_message = result.get('message', {}).get('content', '')
                 return ai_message
             else:
@@ -150,7 +147,7 @@ class OllamaGPTSoVITSSystem:
             "ref_audio_path": self.ref_audio_path,
             "prompt_lang": "zh", 
             "prompt_text": "茶会是淑女的必修课，如果你想学习茶会礼仪的话，我可以教你哦",
-            "speed_factor": 1.0,  # 語速可調整
+            "speed_factor": 1.0,  
             "media_type": "wav"
         }
         
@@ -172,7 +169,7 @@ class OllamaGPTSoVITSSystem:
     def play_audio(self, audio_data):
         """播放音檔數據"""
         try:
-            # 將二進制音檔數據轉換為NumPy數組
+            # 將二進制音檔數據轉換為NumPy
             audio_np, sample_rate = sf.read(io.BytesIO(audio_data))
             
             # 播放音檔
@@ -208,7 +205,6 @@ class OllamaGPTSoVITSSystem:
     
     def process_response(self, llm_response):
         """處理LLM回應，分句轉換成語音並加入playlist"""
-        # 根據常見標點符號分句
         sentences = []
         current_sentence = ""
         
@@ -224,7 +220,7 @@ class OllamaGPTSoVITSSystem:
             sentences.append(current_sentence.strip())
         
         for sentence in sentences:
-            if sentence:  # 確保句子不為空
+            if sentence:
                 audio_data = self.text_to_speech(sentence)
                 if audio_data:
                     self.audio_queue.put(audio_data)
@@ -287,17 +283,14 @@ class OllamaGPTSoVITSSystem:
                     print("====================\n")
                     continue
                 
-                # 添加用戶輸入到歷史記錄
                 self.add_to_history("user", user_input)
                 
                 print("Processing...")
                 response = self.query_ollama(user_input)
                 print(f"你的助手: {response}")
                 
-                # 添加AI回應到歷史記錄
                 self.add_to_history("assistant", response)
                 
-                # 將回應分句處理並轉為語音
                 self.process_response(response)
                 
         finally:
@@ -314,14 +307,14 @@ if __name__ == "__main__":
     
     # 初始化系統
     system = OllamaGPTSoVITSSystem(
-        ollama_model="llama3.2:3b", 
+        ollama_model="gemma3:12b", 
         ollama_api_url="http://localhost:11434/api",
-        gpt_sovits_url="http://localhost:9880",  # 替換為你的GPT-SoVITS API URL
-        ref_audio_path="C:/GPT-SoVITS/芙宁娜/参考音频/【正常】茶会是淑女的必修课，如果你想学习茶会礼仪的话，我可以教你哦.wav",  # 替換為你的參考音檔路徑
-        gpt_weights_path="C:/GPT-SoVITS/芙宁娜/GPT_weights/Furina-e15.ckpt",  # 可選，替換為你的GPT權重路徑
-        sovits_weights_path="C:/GPT-SoVITS/芙宁娜/SoVITS_weights/Furina_e8_s304.pth",  # 可選，替換為你的SoVITS權重路徑
-        system_prompt=system_prompt,  # 添加system prompt
-        max_memory=10  # 設定記憶最大回合數
+        gpt_sovits_url="http://localhost:9880",  
+        ref_audio_path="C:/GPT-SoVITS/芙宁娜/参考音频/【正常】茶会是淑女的必修课，如果你想学习茶会礼仪的话，我可以教你哦.wav",
+        gpt_weights_path="C:/GPT-SoVITS/芙宁娜/GPT_weights/Furina-e15.ckpt",
+        sovits_weights_path="C:/GPT-SoVITS/芙宁娜/SoVITS_weights/Furina_e8_s304.pth",
+        system_prompt=system_prompt,
+        max_memory=10 
     )
     
     # 開始聊天
